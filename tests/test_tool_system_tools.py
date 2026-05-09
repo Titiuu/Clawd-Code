@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 from src.tool_system.context import ToolContext
 from src.tool_system.defaults import build_default_registry
-from src.tool_system.protocol import ToolCall
-from src.tool_system.registry import ToolRegistry
+from src.tool_system.protocol import ToolCall, ToolResult
+from src.tool_system.registry import ToolRegistry, ToolSpec
 from src.tool_system.tools import (
     AskUserQuestionTool,
     BashTool,
@@ -433,6 +433,86 @@ class TestRegistryAndHelloWorldTool(ToolSystemTests):
         reg = ToolRegistry(tools=tools)
         result = reg.dispatch(ToolCall(name="HelloWorld", input={"name": "alice"}), self.ctx)
         self.assertEqual(result.output["message"], "hello alice")
+
+    def test_registry_truncates_large_string_result(self) -> None:
+        class LargeStringTool:
+            def spec(self) -> ToolSpec:
+                return ToolSpec(
+                    name="LargeString",
+                    description="large string",
+                    input_schema={"type": "object", "properties": {}},
+                    max_result_size_chars=80,
+                )
+
+            def run(self, tool_input, context) -> ToolResult:
+                return ToolResult(name="LargeString", output="a" * 100 + "b" * 100)
+
+        result = ToolRegistry([LargeStringTool()]).dispatch(
+            ToolCall(name="LargeString", input={}),
+            self.ctx,
+        )
+        self.assertIsInstance(result.output, str)
+        self.assertLessEqual(len(result.output), 80)
+        self.assertIn("truncated", result.output)
+
+    def test_registry_truncates_large_structured_result_to_jsonable_value(self) -> None:
+        class LargeDictTool:
+            def spec(self) -> ToolSpec:
+                return ToolSpec(
+                    name="LargeDict",
+                    description="large dict",
+                    input_schema={"type": "object", "properties": {}},
+                    max_result_size_chars=120,
+                )
+
+            def run(self, tool_input, context) -> ToolResult:
+                return ToolResult(
+                    name="LargeDict",
+                    output={"items": [{"text": "x" * 500}, {"text": "y" * 500}]},
+                )
+
+        result = ToolRegistry([LargeDictTool()]).dispatch(
+            ToolCall(name="LargeDict", input={}),
+            self.ctx,
+        )
+        json.dumps(result.output)
+        self.assertLessEqual(len(json.dumps(result.output)), 200)
+
+    def test_registry_leaves_small_result_unchanged(self) -> None:
+        class SmallTool:
+            def spec(self) -> ToolSpec:
+                return ToolSpec(
+                    name="Small",
+                    description="small",
+                    input_schema={"type": "object", "properties": {}},
+                    max_result_size_chars=80,
+                )
+
+            def run(self, tool_input, context) -> ToolResult:
+                return ToolResult(name="Small", output={"message": "ok"})
+
+        result = ToolRegistry([SmallTool()]).dispatch(ToolCall(name="Small", input={}), self.ctx)
+        self.assertEqual(result.output, {"message": "ok"})
+
+    def test_registry_truncates_error_result_without_changing_error_flag(self) -> None:
+        class LargeErrorTool:
+            def spec(self) -> ToolSpec:
+                return ToolSpec(
+                    name="LargeError",
+                    description="large error",
+                    input_schema={"type": "object", "properties": {}},
+                    max_result_size_chars=80,
+                )
+
+            def run(self, tool_input, context) -> ToolResult:
+                return ToolResult(name="LargeError", output="e" * 200, is_error=True)
+
+        result = ToolRegistry([LargeErrorTool()]).dispatch(
+            ToolCall(name="LargeError", input={}),
+            self.ctx,
+        )
+        self.assertTrue(result.is_error)
+        self.assertLessEqual(len(result.output), 80)
 
 
 class TestBriefAndAgentTools(ToolSystemTests):

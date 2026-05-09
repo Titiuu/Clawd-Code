@@ -81,6 +81,15 @@ class TestDefaultConfig(unittest.TestCase):
             "zai/glm-5"
         )
 
+    def test_default_session_context_controls(self):
+        """Default config includes context management controls."""
+        config = get_default_config()
+        session = config["session"]
+
+        self.assertTrue(session["auto_compact_enabled"])
+        self.assertEqual(session["auto_compact_buffer_tokens"], 13_000)
+        self.assertTrue(session["tool_result_truncation_enabled"])
+
 
 class TestAPIKeyEncoding(unittest.TestCase):
     """Test API key encoding/decoding."""

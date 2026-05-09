@@ -30,6 +30,18 @@ class TestContextWindowForModel(unittest.TestCase):
         result = get_context_window_for_model("unknown-model-xyz")
         self.assertEqual(result, 200_000)
 
+    def test_auto_compact_threshold_uses_shared_default_buffer(self):
+        """Auto-compact threshold keeps the default 13k token buffer."""
+        from src.context_system.context_analyzer import get_auto_compact_threshold
+        result = get_auto_compact_threshold("claude-sonnet-4-6")
+        self.assertEqual(result, 187_000)
+
+    def test_auto_compact_threshold_keeps_small_model_buffer(self):
+        """Small context windows keep at least a 10% buffer."""
+        from src.context_system.context_analyzer import get_auto_compact_threshold
+        result = get_auto_compact_threshold("tiny-8k")
+        self.assertEqual(result, 7200)
+
 
 class TestAnalyzeContext(unittest.TestCase):
     """Tests for analyze_context()."""

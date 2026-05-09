@@ -37,6 +37,9 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 DEFAULT_CONTEXT_WINDOW = 200_000
+DEFAULT_AUTO_COMPACT_ENABLED = True
+DEFAULT_AUTO_COMPACT_BUFFER_TOKENS = 13_000
+DEFAULT_TOOL_RESULT_TRUNCATION_ENABLED = True
 
 
 @dataclass
@@ -77,6 +80,33 @@ def get_context_window_for_model(model: str) -> int:
     if '1m' in model_lower or 'million' in model_lower:
         return 1_000_000
     return DEFAULT_CONTEXT_WINDOW
+
+
+def get_auto_compact_threshold(
+    model: str,
+    buffer_tokens: int = DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+) -> int:
+    """Calculate the token threshold that should trigger auto-compaction."""
+    max_tokens = get_context_window_for_model(model)
+    if max_tokens <= 0:
+        return 0
+    buffer = max(0, buffer_tokens)
+    if buffer >= max_tokens:
+        buffer = max(1, int(max_tokens * 0.1))
+    return max(1, max_tokens - buffer)
+
+
+def estimate_context_tokens(
+    conversation_api_messages: list[dict[str, Any]],
+    system_prompt: str,
+    tool_schemas: list[dict[str, Any]],
+) -> int:
+    """Estimate provider input tokens for messages, system prompt, and tools."""
+    return (
+        count_messages_tokens(conversation_api_messages)
+        + count_system_prompt_tokens(system_prompt)
+        + count_tool_definition_tokens(tool_schemas)
+    )
 
 
 def count_tool_definition_tokens(tool_schemas: list[dict[str, Any]]) -> int:

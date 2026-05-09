@@ -28,6 +28,7 @@ class ToolContext:
     team: dict[str, Any] | None = None
     output_style_name: str | None = None
     output_style_dir: Path | None = None
+    config: dict[str, Any] = field(default_factory=dict)
 
     # Permission handler callback: called when a tool needs user consent.
     # Signature: (tool_name: str, message: str, suggestion: str | None)

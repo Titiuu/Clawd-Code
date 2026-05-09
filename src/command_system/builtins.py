@@ -16,6 +16,9 @@ from ..context_system.context_analyzer import (
     analyze_context,
     format_context_as_markdown,
     get_context_window_for_model,
+    DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+    DEFAULT_AUTO_COMPACT_ENABLED,
+    get_auto_compact_threshold,
 )
 from ..context_system.microcompact import microcompact_messages, strip_images_from_messages
 from ..cost_tracker import CostTracker
@@ -339,9 +342,26 @@ def context_command_call(args: str, context: CommandContext) -> LocalCommandResu
         if hasattr(context.cost_tracker, "last_usage"):
             api_usage = context.cost_tracker.last_usage
 
-        # Get auto-compact info from config
-        auto_compact_threshold = context.config.get("auto_compact_threshold")
-        is_auto_compact_enabled = context.config.get("is_auto_compact_enabled", False)
+        # Get auto-compact info from config, falling back to runtime defaults.
+        session_config = context.config.get("session", {})
+        if not isinstance(session_config, dict):
+            session_config = {}
+        buffer_tokens = int(
+            session_config.get(
+                "auto_compact_buffer_tokens",
+                context.config.get("auto_compact_buffer_tokens", DEFAULT_AUTO_COMPACT_BUFFER_TOKENS),
+            )
+        )
+        auto_compact_threshold = context.config.get(
+            "auto_compact_threshold",
+            get_auto_compact_threshold(model, buffer_tokens),
+        )
+        is_auto_compact_enabled = bool(
+            session_config.get(
+                "auto_compact_enabled",
+                context.config.get("is_auto_compact_enabled", DEFAULT_AUTO_COMPACT_ENABLED),
+            )
+        )
 
         data = analyze_context(
             conversation_api_messages=conversation_api,

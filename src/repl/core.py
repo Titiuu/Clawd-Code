@@ -73,7 +73,7 @@ import json
 from typing import Any
 
 from src.agent import Session
-from src.config import get_provider_config
+from src.config import get_provider_config, load_config
 from src.outputStyles import resolve_output_style
 from src.providers import get_provider_class
 from src.providers.anthropic_provider import AnthropicProvider
@@ -129,6 +129,7 @@ class ClawdREPL:
 
         self.tool_registry = build_default_registry()
         self.tool_context = ToolContext(workspace_root=Path.cwd())
+        self.tool_context.config = load_config().get("session", {})
         self.tool_context.ask_user = self._ask_user_questions
         # Permission handler with status control for proper input handling
         self._current_status = None

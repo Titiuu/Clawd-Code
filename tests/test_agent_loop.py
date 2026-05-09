@@ -1,7 +1,7 @@
 """Test agent loop with mocked provider to verify tool invocation."""
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 import tempfile
 
@@ -298,6 +298,84 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual("".join(chunks), "Hello from fallback!")
         self.assertEqual(result.response_text, "Hello from fallback!")
         provider.chat.assert_called_once()
+
+    def test_auto_compact_runs_before_provider_call_and_rebuilds_openai_messages(self):
+        """Oversized context triggers auto compact and provider sees compacted messages."""
+        conversation = Conversation()
+        conversation.add_user_message("old user " + ("x" * 2000))
+        conversation.add_assistant_message("old assistant " + ("y" * 2000))
+
+        provider = MagicMock()
+        provider.model = "test-1k"
+        provider.chat_stream_response.side_effect = NotImplementedError()
+        provider.chat.return_value = ChatResponse(
+            content="done",
+            model="test-1k",
+            usage={},
+            finish_reason="stop",
+            tool_uses=None,
+        )
+
+        async def fake_compact(conv, _provider, _model, trigger="manual", **_kwargs):
+            self.assertEqual(trigger, "auto")
+            conv.clear()
+            conv.add_user_message("summary after compact")
+
+        with patch("src.tool_system.agent_loop.estimate_context_tokens", return_value=1000), \
+             patch("src.tool_system.agent_loop.get_auto_compact_threshold", return_value=10), \
+             patch("src.tool_system.agent_loop.compact_conversation", side_effect=fake_compact) as compact_mock:
+            result = run_agent_loop(
+                conversation=conversation,
+                provider=provider,
+                tool_registry=self.registry,
+                tool_context=self.context,
+                verbose=False,
+            )
+
+        self.assertEqual(result.response_text, "done")
+        compact_mock.assert_called_once()
+        sent_messages = provider.chat.call_args.args[0]
+        sent_text = "\n".join(str(m.get("content", "")) for m in sent_messages)
+        self.assertIn("summary after compact", sent_text)
+        self.assertNotIn("old user", sent_text)
+
+    def test_auto_compact_failure_continues_original_request_once(self):
+        """A compact failure does not block the provider call or loop forever."""
+        conversation = Conversation()
+        conversation.add_user_message("old user")
+        conversation.add_assistant_message("old assistant")
+
+        provider = MagicMock()
+        provider.model = "test-1k"
+        provider.chat_stream_response.side_effect = NotImplementedError()
+        provider.chat.return_value = ChatResponse(
+            content="done",
+            model="test-1k",
+            usage={},
+            finish_reason="stop",
+            tool_uses=None,
+        )
+
+        async def fail_compact(*_args, **_kwargs):
+            raise RuntimeError("compact failed")
+
+        with patch("src.tool_system.agent_loop.estimate_context_tokens", return_value=1000), \
+             patch("src.tool_system.agent_loop.get_auto_compact_threshold", return_value=10), \
+             patch("src.tool_system.agent_loop.compact_conversation", side_effect=fail_compact) as compact_mock:
+            result = run_agent_loop(
+                conversation=conversation,
+                provider=provider,
+                tool_registry=self.registry,
+                tool_context=self.context,
+                verbose=False,
+            )
+
+        self.assertEqual(result.response_text, "done")
+        compact_mock.assert_called_once()
+        provider.chat.assert_called_once()
+        sent_messages = provider.chat.call_args.args[0]
+        sent_text = "\n".join(str(m.get("content", "")) for m in sent_messages)
+        self.assertIn("old user", sent_text)
 
 
 if __name__ == "__main__":

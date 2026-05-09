@@ -8,6 +8,12 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from .context_system.context_analyzer import (
+    DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+    DEFAULT_AUTO_COMPACT_ENABLED,
+    DEFAULT_TOOL_RESULT_TRUNCATION_ENABLED,
+)
+
 
 def get_config_path() -> Path:
     """Get the path to the configuration file."""
@@ -32,7 +38,10 @@ def _get_default_config_from_providers() -> dict[str, Any]:
         },
         "session": {
             "auto_save": True,
-            "max_history": 100
+            "max_history": 100,
+            "auto_compact_enabled": DEFAULT_AUTO_COMPACT_ENABLED,
+            "auto_compact_buffer_tokens": DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+            "tool_result_truncation_enabled": DEFAULT_TOOL_RESULT_TRUNCATION_ENABLED,
         }
     }
 

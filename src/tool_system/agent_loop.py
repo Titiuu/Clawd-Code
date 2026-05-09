@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -9,7 +11,14 @@ from typing import Any, Callable
 from .registry import ToolRegistry
 from .context import ToolContext
 from ..agent.conversation import Conversation, TextContentBlock, ToolUseContentBlock
+from ..compact_service.service import compact_conversation
 from ..context_system import build_context_prompt
+from ..context_system.context_analyzer import (
+    DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+    DEFAULT_AUTO_COMPACT_ENABLED,
+    estimate_context_tokens,
+    get_auto_compact_threshold,
+)
 from ..outputStyles import resolve_output_style
 from ..providers.base import BaseProvider, ChatResponse
 from ..providers.anthropic_provider import AnthropicProvider
@@ -25,6 +34,68 @@ def _build_openai_tool_result_content(result_output: Any) -> str:
     if isinstance(result_output, str):
         return result_output
     return json.dumps(result_output, ensure_ascii=False)
+
+
+def _message_blocks_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(str(block))
+            continue
+        if block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+        elif block.get("type") == "tool_result":
+            parts.append(_build_openai_tool_result_content(block.get("content", "")))
+        else:
+            parts.append(json.dumps(block, ensure_ascii=False))
+    return "\n".join(part for part in parts if part)
+
+
+def _build_openai_messages_from_conversation(conversation: Conversation) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for msg in conversation.get_messages():
+        role = msg.get("role", "")
+        if role == "system":
+            role = "user"
+        messages.append({"role": role, "content": _message_blocks_to_text(msg.get("content", ""))})
+    return messages
+
+
+def _get_session_config(tool_context: ToolContext) -> dict[str, Any]:
+    config = getattr(tool_context, "config", {}) or {}
+    if "session" in config and isinstance(config["session"], dict):
+        return config["session"]
+    return config
+
+
+def _get_provider_model(provider: BaseProvider) -> str:
+    model = getattr(provider, "model", None)
+    return model if isinstance(model, str) and model else "claude-sonnet-4-6"
+
+
+def _get_int_config(config: dict[str, Any], key: str, default: int) -> int:
+    try:
+        return int(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _run_auto_compact(conversation: Conversation, provider: BaseProvider, model: str) -> None:
+    async def _compact() -> None:
+        await compact_conversation(conversation, provider, model, trigger="auto")
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_compact())
+        return
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(lambda: asyncio.run(_compact())).result()
 
 def summarize_tool_result(name: str, output: Any) -> str:
     """Create a concise, single-line summary for tool result output."""
@@ -281,17 +352,13 @@ def run_agent_loop(
     style_prompt = resolve_output_style(style_name, style_dir).prompt
     effective_system_prompt = _build_effective_system_prompt(style_prompt, tool_context)
 
-    # Seed OpenAI messages from initial conversation messages
-    for msg in conversation.messages:
-        if isinstance(msg.content, str):
-            openai_messages.append({"role": msg.role, "content": msg.content})
-        else:
-            # If there are already block messages, we are probably Anthropic; leave as is
-            pass
+    # Seed OpenAI messages from initial conversation messages.
+    openai_messages = _build_openai_messages_from_conversation(conversation)
 
     # Track usage across all turns
     total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
     turn_count = 0
+    auto_compact_attempted = False
 
     for turn in range(max_turns):
         if _is_anthropic_provider(provider):
@@ -300,12 +367,44 @@ def run_agent_loop(
             # Use OpenAI formatted messages for non-Anthropic
             api_messages = openai_messages
 
+        session_config = _get_session_config(tool_context)
+        auto_compact_enabled = bool(
+            session_config.get("auto_compact_enabled", DEFAULT_AUTO_COMPACT_ENABLED)
+        )
+        model = _get_provider_model(provider)
+        buffer_tokens = _get_int_config(
+            session_config,
+            "auto_compact_buffer_tokens",
+            DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
+        )
+        threshold = get_auto_compact_threshold(model, buffer_tokens)
+        estimated_tokens = estimate_context_tokens(
+            api_messages,
+            effective_system_prompt,
+            tool_schemas,
+        )
+        if (
+            auto_compact_enabled
+            and not auto_compact_attempted
+            and len(conversation.get_messages()) >= 2
+            and estimated_tokens > threshold
+        ):
+            auto_compact_attempted = True
+            try:
+                _run_auto_compact(conversation, provider, model)
+                if _is_anthropic_provider(provider):
+                    api_messages = conversation.get_messages()
+                else:
+                    openai_messages = _build_openai_messages_from_conversation(conversation)
+                    api_messages = openai_messages
+            except Exception:
+                pass
+
         call_kwargs: dict[str, Any] = {"tools": tool_schemas}
         if _is_anthropic_provider(provider):
             call_kwargs["system"] = effective_system_prompt
         else:
-            if turn == 0:
-                api_messages = [{"role": "system", "content": effective_system_prompt}, *api_messages]
+            api_messages = [{"role": "system", "content": effective_system_prompt}, *api_messages]
         response, streamed_live_text = _call_provider_for_turn(
             provider=provider,
             api_messages=api_messages,
