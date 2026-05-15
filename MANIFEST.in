@@ -2,3 +2,4 @@ include README.md
 include LICENSE
 recursive-include src *.py
 recursive-include src *.json
+recursive-include src/server/static *.html *.css *.js

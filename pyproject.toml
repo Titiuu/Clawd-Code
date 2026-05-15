@@ -25,12 +25,15 @@ classifiers = [
 
 dependencies = [
     "anthropic",
+    "fastapi>=0.110.0",
     "openai",
+    "python-multipart>=0.0.9",
     "zhipuai",
     "python-dotenv",
     "rich",
     "prompt-toolkit",
     "tiktoken>=0.7.0",
+    "uvicorn[standard]>=0.27.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +45,7 @@ dev = [
 
 [project.scripts]
 clawd = "src.cli:main"
+clawd-runtime = "src.server.app:main"
 
 [project.urls]
 Homepage = "https://github.com/GPT-AGI/Clawd-Codex"
@@ -53,4 +57,4 @@ where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-src = ["reference_data/*.json", "reference_data/subsystems/*.json"]
+src = ["reference_data/*.json", "reference_data/subsystems/*.json", "server/static/*"]

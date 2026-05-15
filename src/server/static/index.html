@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clawd Runtime</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Clawd Runtime</h1>
+          <p>Agent runtime console</p>
+        </div>
+        <div id="global-status" class="status-pill status-muted">Ready</div>
+      </header>
+
+      <section class="layout">
+        <aside class="side">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Health</h2>
+                <p>Runtime and provider status</p>
+              </div>
+              <button id="health-button" type="button">Check Health</button>
+            </div>
+            <dl id="health-details" class="details">
+              <div><dt>Status</dt><dd>Not checked</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Skills</h2>
+                <p>Installed runtime skills</p>
+              </div>
+              <button id="refresh-skills-button" type="button">Refresh</button>
+            </div>
+
+            <form id="skill-form" class="upload-form">
+              <label>
+                Skill name
+                <input id="skill-name" name="skill-name" type="text" placeholder="demo" autocomplete="off" required />
+              </label>
+              <label>
+                Skill zip
+                <input id="skill-file" name="skill-file" type="file" accept=".zip,application/zip" required />
+              </label>
+              <label class="check-row">
+                <input id="skill-overwrite" name="skill-overwrite" type="checkbox" />
+                <span>Overwrite existing skill</span>
+              </label>
+              <button id="upload-skill-button" type="submit">Upload Skill</button>
+              <div id="skill-upload-status" class="form-status" role="status"></div>
+            </form>
+
+            <div id="skills-list" class="skills-list" aria-live="polite"></div>
+          </section>
+        </aside>
+
+        <section class="chat-panel">
+          <div class="panel-header chat-header">
+            <div>
+              <h2>Chat</h2>
+              <p id="session-label">No active session</p>
+            </div>
+            <div class="chat-actions">
+              <label>
+                Max turns
+                <input id="max-turns" type="number" min="1" max="100" value="20" />
+              </label>
+              <button id="new-chat-button" type="button">New Chat</button>
+            </div>
+          </div>
+
+          <div id="chat-log" class="chat-log" aria-live="polite"></div>
+
+          <form id="chat-form" class="chat-form">
+            <textarea id="chat-input" rows="3" placeholder="Ask the runtime..." required></textarea>
+            <button id="send-button" type="submit">Send</button>
+          </form>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
