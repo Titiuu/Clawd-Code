@@ -23,6 +23,7 @@ from ..outputStyles import resolve_output_style
 from ..providers.base import BaseProvider, ChatResponse
 from ..providers.anthropic_provider import AnthropicProvider
 from ..providers.minimax_provider import MinimaxProvider
+from .tools.skill import build_skill_system_prompt, build_skill_tool_description
 
 
 def _is_anthropic_provider(provider: BaseProvider) -> bool:
@@ -237,7 +238,12 @@ def _call_provider_for_turn(
     return response, False
 
 
-def _build_effective_system_prompt(style_prompt: str, tool_context: ToolContext) -> str:
+def _build_effective_system_prompt(
+    style_prompt: str,
+    tool_context: ToolContext,
+    *,
+    include_skills: bool = False,
+) -> str:
     try:
         context_prompt = build_context_prompt(
             tool_context.workspace_root,
@@ -245,9 +251,10 @@ def _build_effective_system_prompt(style_prompt: str, tool_context: ToolContext)
         )
     except Exception:
         context_prompt = ""
-    if not context_prompt.strip():
-        return style_prompt
-    return f"{style_prompt}\n\n{context_prompt}"
+    skill_prompt = build_skill_system_prompt(tool_context) if include_skills else ""
+    return "\n\n".join(
+        part for part in (style_prompt, context_prompt, skill_prompt) if part.strip()
+    )
 
 
 def summarize_tool_use(name: str, tool_input: dict[str, Any]) -> str:
@@ -338,9 +345,12 @@ def run_agent_loop(
     # Convert tools to schemas (Anthropic format)
     tool_schemas = []
     for spec in tool_registry.list_specs():
+        description = spec.description
+        if spec.name.lower() == "skill":
+            description = build_skill_tool_description(description, tool_context)
         tool_schemas.append({
             "name": spec.name,
-            "description": spec.description,
+            "description": description,
             "input_schema": spec.input_schema,
         })
 
@@ -350,7 +360,11 @@ def run_agent_loop(
     style_name = getattr(tool_context, "output_style_name", None)
     style_dir = getattr(tool_context, "output_style_dir", None)
     style_prompt = resolve_output_style(style_name, style_dir).prompt
-    effective_system_prompt = _build_effective_system_prompt(style_prompt, tool_context)
+    effective_system_prompt = _build_effective_system_prompt(
+        style_prompt,
+        tool_context,
+        include_skills=tool_registry.get("Skill") is not None,
+    )
 
     # Seed OpenAI messages from initial conversation messages.
     openai_messages = _build_openai_messages_from_conversation(conversation)

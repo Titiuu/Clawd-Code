@@ -11,6 +11,7 @@ from src.skills.frontmatter import parse_frontmatter
 from src.skills.loader import clear_skill_registry, get_all_skills
 from src.tool_system.context import ToolContext
 from src.tool_system.tools import SkillTool
+from src.tool_system.tools.skill import build_skill_listing, has_model_invocable_skills
 
 
 class SkillSystemTests(unittest.TestCase):
@@ -85,3 +86,49 @@ class TestSkillUse(SkillSystemTests):
             self.assertTrue(out["success"])
             self.assertIn("Hello bob (bob)", out["prompt"])
             self.assertIn('bob "the builder"', out["prompt"])
+
+    def test_skill_listing_includes_description_and_when_to_use(self) -> None:
+        skills_dir = self.root / "skills"
+        create_skill(
+            directory=skills_dir,
+            name="review-pr",
+            description="Review pull requests",
+            when_to_use="use when asked to inspect a PR",
+            body="Review it",
+        )
+        ctx = ToolContext(workspace_root=self.root)
+        with patch.dict(os.environ, {"CLAWD_SKILLS_DIR": str(skills_dir)}):
+            listing = build_skill_listing(ctx)
+
+        self.assertIn("- review-pr: Review pull requests - use when asked to inspect a PR", listing)
+
+    def test_skill_listing_excludes_disable_model_invocation(self) -> None:
+        skills_dir = self.root / "skills"
+        create_skill(
+            directory=skills_dir,
+            name="manual-only",
+            description="Manual only",
+            disable_model_invocation=True,
+            body="Do it",
+        )
+        ctx = ToolContext(workspace_root=self.root)
+        with patch.dict(os.environ, {"CLAWD_SKILLS_DIR": str(skills_dir)}):
+            listing = build_skill_listing(ctx)
+
+        self.assertNotIn("manual-only", listing)
+
+    def test_skill_listing_includes_non_user_invocable_for_model(self) -> None:
+        skills_dir = self.root / "skills"
+        create_skill(
+            directory=skills_dir,
+            name="model-only",
+            description="Model only",
+            user_invocable=False,
+            body="Do it",
+        )
+        ctx = ToolContext(workspace_root=self.root)
+        with patch.dict(os.environ, {"CLAWD_SKILLS_DIR": str(skills_dir)}):
+            self.assertTrue(has_model_invocable_skills(ctx))
+            listing = build_skill_listing(ctx)
+
+        self.assertIn("model-only", listing)

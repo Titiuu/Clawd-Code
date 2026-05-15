@@ -12,11 +12,86 @@ from ..protocol import ToolResult
 from ..registry import ToolSpec
 
 
+SKILL_LISTING_CHAR_BUDGET = 8_000
+MAX_SKILL_DESCRIPTION_CHARS = 250
+
+
+def get_model_invocable_skills(context: ToolContext):
+    from ...skills.loader import get_all_skills
+
+    cwd = context.cwd or context.workspace_root
+    return [
+        skill
+        for skill in get_all_skills(project_root=cwd)
+        if not skill.disable_model_invocation
+    ]
+
+
+def has_model_invocable_skills(context: ToolContext) -> bool:
+    return bool(get_model_invocable_skills(context))
+
+
+def build_skill_listing(
+    context: ToolContext,
+    *,
+    char_budget: int = SKILL_LISTING_CHAR_BUDGET,
+) -> str:
+    entries: list[str] = []
+    remaining = max(0, char_budget)
+
+    for skill in sorted(
+        get_model_invocable_skills(context),
+        key=lambda s: s.name.lower(),
+    ):
+        description = skill.description.strip()
+        if skill.when_to_use:
+            description = f"{description} - {skill.when_to_use.strip()}"
+        if len(description) > MAX_SKILL_DESCRIPTION_CHARS:
+            description = description[: MAX_SKILL_DESCRIPTION_CHARS - 1] + "..."
+
+        line = f"- {skill.name}: {description}" if description else f"- {skill.name}"
+        line_len = len(line) + (1 if entries else 0)
+        if entries and line_len > remaining:
+            break
+        if not entries and line_len > remaining:
+            return ""
+        entries.append(line)
+        remaining -= line_len
+
+    return "\n".join(entries)
+
+
+def build_skill_system_prompt(context: ToolContext) -> str:
+    listing = build_skill_listing(context)
+    if not listing:
+        return ""
+    return (
+        "The following skills are available for use with the Skill tool:\n\n"
+        f"{listing}\n\n"
+        "When the user's request matches one of these skills, invoke the Skill tool "
+        "before generating any other response about the task. Do not guess skills "
+        "that are not listed here."
+    )
+
+
+def build_skill_tool_description(base_description: str, context: ToolContext) -> str:
+    return (
+        f"{base_description}\n\n"
+        "Available skills are listed in the system prompt. If the request matches "
+        "an available skill, call this tool before answering."
+    )
+
+
 class SkillTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="Skill",
-            description="Execute a prompt-based SKILL.md skill or a legacy Python skill module.",
+            description=(
+                "Execute a prompt-based SKILL.md skill or a legacy Python skill module. "
+                "Available skills are listed in the system prompt. If the user asks for "
+                "a matching task or references a slash command such as /commit, call this "
+                "tool before answering. Do not guess unlisted skills."
+            ),
             input_schema={
                 "anyOf": [
                     {
@@ -31,7 +106,10 @@ class SkillTool:
                     {
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {"name": {"type": "string"}, "input": {"type": "object"}},
+                        "properties": {
+                            "name": {"type": "string"},
+                            "input": {"type": "object"},
+                        },
                         "required": ["name"],
                     },
                 ]

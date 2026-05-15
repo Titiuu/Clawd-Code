@@ -1043,6 +1043,14 @@ class ClawdREPL:
     def _should_try_direct_stream(self, user_input: str) -> bool:
         if not self.stream:
             return False
+        try:
+            if self.tool_registry.get("Skill") is not None:
+                from src.tool_system.tools.skill import has_model_invocable_skills
+
+                if has_model_invocable_skills(self.tool_context):
+                    return False
+        except Exception:
+            pass
         text = user_input.strip().lower()
         if not text or text.startswith("/"):
             return False

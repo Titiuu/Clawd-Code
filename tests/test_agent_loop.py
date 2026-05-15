@@ -1,5 +1,6 @@
 """Test agent loop with mocked provider to verify tool invocation."""
 
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -7,6 +8,7 @@ import tempfile
 
 from src.agent.conversation import Conversation
 from src.providers.base import ChatResponse
+from src.skills.create import create_skill
 from src.tool_system.defaults import build_default_registry
 from src.tool_system.context import ToolContext
 from src.tool_system.agent_loop import run_agent_loop, AgentLoopResult
@@ -82,6 +84,50 @@ class TestAgentLoop(unittest.TestCase):
         hello_py = self.workspace / "hello.py"
         self.assertTrue(hello_py.exists())
         self.assertEqual(hello_py.read_text(), "print('hello world')")
+
+    def test_agent_loop_injects_skill_listing_when_skill_tool_available(self):
+        """Model-invocable skills should be visible in the provider system prompt."""
+        skills_dir = self.workspace / "skills"
+        create_skill(
+            directory=skills_dir,
+            name="review-pr",
+            description="Review pull requests",
+            when_to_use="use when asked to inspect a PR",
+            body="Review it",
+        )
+        conversation = Conversation()
+        conversation.add_user_message("Please review this PR")
+
+        mock_provider = MagicMock()
+        mock_provider.chat_stream_response.side_effect = NotImplementedError()
+        mock_provider.chat.return_value = ChatResponse(
+            content="Done",
+            model="test-model",
+            usage=None,
+            finish_reason="stop",
+            tool_uses=None,
+        )
+
+        with patch.dict(os.environ, {"CLAWD_SKILLS_DIR": str(skills_dir)}):
+            run_agent_loop(
+                conversation=conversation,
+                provider=mock_provider,
+                tool_registry=self.registry,
+                tool_context=self.context,
+                verbose=False,
+            )
+
+        api_messages = mock_provider.chat.call_args.args[0]
+        system_prompt = api_messages[0]["content"]
+        self.assertIn("The following skills are available for use with the Skill tool", system_prompt)
+        self.assertIn("review-pr: Review pull requests - use when asked to inspect a PR", system_prompt)
+        skill_schema = next(
+            schema
+            for schema in mock_provider.chat.call_args.kwargs["tools"]
+            if schema["name"] == "Skill"
+        )
+        self.assertIn("Available skills are listed in the system prompt", skill_schema["description"])
+        self.assertNotIn("review-pr: Review pull requests - use when asked to inspect a PR", skill_schema["description"])
 
     def test_agent_loop_creates_hello_world(self):
         """Test agent loop creates hello.py and writes print('hello world')."""

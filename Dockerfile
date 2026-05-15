@@ -13,19 +13,16 @@ RUN apt-get update \
         ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
-COPY pyproject.toml README.md LICENSE MANIFEST.in ./
-COPY src ./src
+COPY ./ /home/app/
 
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --no-build-isolation .
+    && python -m pip install --no-build-isolation /home/app
 
 RUN useradd --create-home --shell /bin/bash clawd \
-    && mkdir -p /workspace \
+    && mkdir -p /home/workspace \
     && chown -R clawd:clawd /workspace /home/clawd
 
 USER clawd
-WORKDIR /workspace
+WORKDIR /home/workspace
 
-ENTRYPOINT ["clawd"]
+CMD ["python", "-m", "http.server", "31366"]

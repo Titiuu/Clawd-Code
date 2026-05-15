@@ -71,6 +71,30 @@ class TestREPL(unittest.TestCase):
                     repl = ClawdREPL(provider_name="glm", stream=True)
                     self.assertTrue(repl.stream)
 
+    def test_direct_stream_disabled_when_model_invocable_skills_exist(self):
+        with patch('src.config.get_config_path', return_value=self.config_dir / "config.json"):
+            with patch('src.repl.core.Session.create'):
+                with patch('src.repl.core.get_provider_class') as mock_provider_class:
+                    mock_provider = Mock()
+                    mock_provider.model = "glm-4.5"
+                    mock_provider_class.return_value = mock_provider
+
+                    repl = ClawdREPL(provider_name="glm", stream=True)
+                    with patch('src.tool_system.tools.skill.has_model_invocable_skills', return_value=True):
+                        self.assertFalse(repl._should_try_direct_stream("summarize this"))
+
+    def test_direct_stream_allowed_when_no_model_invocable_skills_exist(self):
+        with patch('src.config.get_config_path', return_value=self.config_dir / "config.json"):
+            with patch('src.repl.core.Session.create'):
+                with patch('src.repl.core.get_provider_class') as mock_provider_class:
+                    mock_provider = Mock()
+                    mock_provider.model = "glm-4.5"
+                    mock_provider_class.return_value = mock_provider
+
+                    repl = ClawdREPL(provider_name="glm", stream=True)
+                    with patch('src.tool_system.tools.skill.has_model_invocable_skills', return_value=False):
+                        self.assertTrue(repl._should_try_direct_stream("summarize this"))
+
     def test_startup_header_contains_logo_and_metadata(self):
         with patch('src.config.get_config_path', return_value=self.config_dir / "config.json"):
             with patch('src.repl.core.Session.create'):
@@ -233,8 +257,9 @@ class TestREPL(unittest.TestCase):
                     repl = ClawdREPL(provider_name="glm", stream=True)
                     repl.console.print = Mock()
 
-                    with patch('src.repl.core.run_agent_loop') as mock_agent_loop:
-                        repl.chat("你是谁")
+                    with patch('src.tool_system.tools.skill.has_model_invocable_skills', return_value=False):
+                        with patch('src.repl.core.run_agent_loop') as mock_agent_loop:
+                            repl.chat("你是谁")
 
                     mock_provider.chat_stream.assert_called_once()
                     mock_agent_loop.assert_not_called()
@@ -294,9 +319,10 @@ class TestREPL(unittest.TestCase):
                     repl = ClawdREPL(provider_name="glm", stream=True)
                     repl.console.print = Mock()
 
-                    with patch('src.repl.core.run_agent_loop') as mock_agent_loop:
-                        mock_agent_loop.return_value = Mock(response_text="fallback", usage=None, num_turns=1)
-                        repl.chat("你好呀")
+                    with patch('src.tool_system.tools.skill.has_model_invocable_skills', return_value=False):
+                        with patch('src.repl.core.run_agent_loop') as mock_agent_loop:
+                            mock_agent_loop.return_value = Mock(response_text="fallback", usage=None, num_turns=1)
+                            repl.chat("你好呀")
 
                     mock_provider.chat_stream.assert_called_once()
                     mock_agent_loop.assert_called_once()
